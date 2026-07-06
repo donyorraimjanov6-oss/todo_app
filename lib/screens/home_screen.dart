@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/folder_model.dart';
-import '../models/task_model.dart'; // Новый импорт
+import '../models/task_model.dart';
 import '../widgets/folder_card.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -11,49 +13,90 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final List<FolderModel> _folders = [
-    FolderModel(name: 'Работа', color: Colors.blue),
-    FolderModel(name: 'Личное', color: Colors.green),
-    FolderModel(name: 'Учеба', color: Colors.orange),
-    FolderModel(name: 'Спорт', color: Colors.purple),
-  ];
+  List<FolderModel> _folders = [];
+  List<TaskModel> _tasks = [];
+  String? _selectedFolderName;
 
-  // Новый динамический список для хранения задач
-  final List<TaskModel> _tasks = [];
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  // Загрузка данных из памяти телефона при старте
+  Future<void> _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? foldersJson = prefs.getString('user_folders');
+    final String? tasksJson = prefs.getString('user_tasks');
+
+    setState(() {
+      if (foldersJson != null) {
+        final List<dynamic> decoded = jsonDecode(foldersJson);
+        _folders = decoded.map((item) => FolderModel.fromJson(item)).toList();
+      } else {
+        _folders = [
+          FolderModel(name: 'Работа', color: Colors.blue),
+          FolderModel(name: 'Личное', color: Colors.green),
+          FolderModel(name: 'Учеба', color: Colors.orange),
+          FolderModel(name: 'Спорт', color: Colors.purple),
+        ];
+      }
+
+      if (tasksJson != null) {
+        final List<dynamic> decoded = jsonDecode(tasksJson);
+        _tasks = decoded.map((item) => TaskModel.fromJson(item)).toList();
+      }
+    });
+  }
+
+  // Сохранение изменений в память
+  Future<void> _saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String foldersJson = jsonEncode(_folders.map((f) => f.toJson()).toList());
+    final String tasksJson = jsonEncode(_tasks.map((t) => t.toJson()).toList());
+
+    await prefs.setString('user_folders', foldersJson);
+    await prefs.setString('user_tasks', tasksJson);
+  }
+
+  int _getUncompletedCount(String folderName) {
+    return _tasks.where((task) => task.folderName == folderName && !task.isDone).length;
+  }
+
+  Color _getFolderColor(String folderName) {
+    final folder = _folders.firstWhere(
+      (f) => f.name == folderName,
+      orElse: () => FolderModel(name: '', color: Colors.grey),
+    );
+    return folder.color;
+  }
 
   void _addFolder(String name, Color color) {
-    setState(() {
-      _folders.add(FolderModel(name: name, color: color));
-    });
+    setState(() { _folders.add(FolderModel(name: name, color: color)); });
+    _saveData();
   }
 
   void _deleteFolder(int index) {
-    setState(() {
-      _folders.removeAt(index);
-    });
+    if (_selectedFolderName == _folders[index].name) _selectedFolderName = null;
+    setState(() { _folders.removeAt(index); });
+    _saveData();
   }
 
-  // Новая функция для добавления задачи в список
-  void _addTask(String title) {
-    setState(() {
-      _tasks.add(TaskModel(title: title));
-    });
+  void _addTask(String title, String folderName) {
+    setState(() { _tasks.add(TaskModel(title: title, folderName: folderName)); });
+    _saveData();
   }
 
-  // Новая функция для переключения статуса галочки
-  void _toggleTaskStatus(int index) {
-    setState(() {
-      _tasks[index].isDone = !_tasks[index].isDone;
-    });
+  void _toggleTaskStatus(TaskModel task) {
+    setState(() { task.isDone = !task.isDone; });
+    _saveData();
   }
 
-  // Новая функция для удаления задачи (по желанию, долгим нажатием)
-  void _deleteTask(int index) {
-    setState(() {
-      _tasks.removeAt(index);
-    });
+  void _deleteTask(TaskModel task) {
+    setState(() { _tasks.remove(task); });
+    _saveData();
   }
-
+  // Всплывающее окно для новой папки
   void _showAddFolderDialog() {
     final TextEditingController controller = TextEditingController();
     Color selectedColor = Colors.red;
@@ -83,10 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Отмена'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
             ElevatedButton(
               onPressed: () {
                 if (controller.text.isNotEmpty) {
@@ -109,59 +149,88 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Обновленное диалоговое окно добавления задачи с контроллером текста
+  // Всплывающее окно для новой задачи
   void _showAddTaskDialog() {
     final TextEditingController taskController = TextEditingController();
+    String selectedFolder = _folders.isNotEmpty ? _folders.first.name : 'Без папки';
 
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Добавить новую задачу'),
-          content: TextField(
-            controller: taskController,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: 'Что нужно сделать?'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Отмена'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (taskController.text.isNotEmpty) {
-                  _addTask(taskController.text); // Сохраняем задачу
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('Добавить'),
-            ),
-          ],
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Добавить новую задачу'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: taskController,
+                    autofocus: true,
+                    decoration: const InputDecoration(labelText: 'Что нужно сделать?'),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Выберите папку:'),
+                      DropdownButton<String>(
+                        value: selectedFolder,
+                        items: _folders.isEmpty
+                            ? [const DropdownMenuItem(value: 'Без папки', child: Text('Без папки'))]
+                            : _folders.map((folder) {
+                                return DropdownMenuItem<String>(
+                                  value: folder.name,
+                                  child: Text(folder.name),
+                                );
+                              }).toList(),
+                        onChanged: (String? newValue) {
+                          if (newValue != null) {
+                            setDialogState(() { selectedFolder = newValue; });
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+                ElevatedButton(
+                  onPressed: () {
+                    if (taskController.text.isNotEmpty) {
+                      _addTask(taskController.text, selectedFolder);
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: const Text('Добавить'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
-
   @override
   Widget build(BuildContext context) {
+    // Фильтрация списка задач на лету
+    final List<TaskModel> filteredTasks = _selectedFolderName == null
+        ? _tasks
+        : _tasks.where((task) => task.folderName == _selectedFolderName).toList();
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Мои Задачи'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Мои Задачи'), centerTitle: true),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Блок папок сверху
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
-             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Папки',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
+                const Text('Папки', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 TextButton.icon(
                   onPressed: _showAddFolderDialog,
                   icon: const Icon(Icons.add),
@@ -179,59 +248,88 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: _folders.length,
                     itemBuilder: (context, index) {
+                      final folder = _folders[index];
+                      final isSelected = _selectedFolderName == folder.name;
                       return FolderCard(
-                        folder: _folders[index],
+                        folder: folder,
+                        taskCount: _getUncompletedCount(folder.name),
+                        isSelected: isSelected,
+                        onTap: () {
+                          setState(() { _selectedFolderName = isSelected ? null : folder.name; });
+                        },
                         onDelete: () => _deleteFolder(index),
                       );
                     },
                   ),
           ),
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'Задачи',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          // Блок заголовка задач
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _selectedFolderName == null ? 'Все задачи' : 'Задачи: $_selectedFolderName',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                if (_selectedFolderName != null)
+                  TextButton(
+                    onPressed: () { setState(() { _selectedFolderName = null; }); },
+                    child: const Text('Показать все'),
+                  ),
+              ],
             ),
           ),
-          // Обновленный интерактивный список созданных задач
+          // Список цветных задач
           Expanded(
-            child: _tasks.isEmpty
-                ? const Center(
-                    child: Text(
-                      'Список задач пуст',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  )
+            child: filteredTasks.isEmpty
+                ? const Center(child: Text('В этой категории нет задач', style: TextStyle(color: Colors.grey)))
                 : ListView.builder(
-                    itemCount: _tasks.length,
+                    itemCount: filteredTasks.length,
                     itemBuilder: (context, index) {
-                      final task = _tasks[index];
-                      return CheckboxListTile(
-                        title: Text(
-                          task.title,
-                          style: TextStyle(
-                            // Если задача выполнена, текст зачеркивается
-                            decoration: task.isDone
-                                ? TextDecoration.lineThrough
-                                : TextDecoration.none,
-                            color: task.isDone ? Colors.grey : Colors.black,
+                      final task = filteredTasks[index];
+                      final taskColor = _getFolderColor(task.folderName);
+
+                      return Card(
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        elevation: 1,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: taskColor.withOpacity(0.5), width: 1.5),
+                        ),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: taskColor.withOpacity(0.03),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: CheckboxListTile(
+                            activeColor: taskColor,
+                            checkColor: Colors.white,
+                            title: Text(
+                              task.title,
+                              style: TextStyle(
+                                decoration: task.isDone ? TextDecoration.lineThrough : TextDecoration.none,
+                                color: task.isDone ? Colors.grey : taskColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text('Папка: ${task.folderName}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            value: task.isDone,
+                            onChanged: (bool? value) { _toggleTaskStatus(task); },
+                            secondary: IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red),
+                              onPressed: () => _deleteTask(task),
+                            ),
+                            controlAffinity: ListTileControlAffinity.leading,
                           ),
                         ),
-                        value: task.isDone,
-                        onChanged: (bool? value) {
-                          _toggleTaskStatus(index); // Переключаем статус выполнения
-                        },
-                        secondary: IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.red),
-                          onPressed: () => _deleteTask(index), // Кнопка удаления задачи
-                        ),
-                        controlAffinity: ListTileControlAffinity.leading,
                       );
                     },
                   ),
           ),
         ],
       ),
+      // Нижний плюс
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddTaskDialog,
         tooltip: 'Добавить задачу',
