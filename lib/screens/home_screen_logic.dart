@@ -1,5 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Подключаем облако
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/folder_model.dart';
 import '../models/task_model.dart';
 
@@ -7,33 +8,37 @@ mixin HomeScreenLogic<T extends StatefulWidget> on State<T> {
   List<FolderModel> folders = [];
   List<TaskModel> tasks = [];
   String? selectedFolderName;
+  DateTime selectedDate = DateTime.now();
 
-  // Создаем ссылку на клиент Supabase
   final _supabase = Supabase.instance.client;
 
-  // ЗАГРУЗКА ДАННЫХ ИЗ ОБЛАКА SUPABASE
-  Future<void> loadData() async {
-    try {
-      // Читаем папки и задачи параллельно
-      final foldersData = await _supabase.from('folders').select();
-      final tasksData = await _supabase.from('tasks').select();
+  String get formattedSelectedDate => selectedDate.toString().split(' ')[0];
 
+    // СВЕРХНАДЁЖНАЯ ЗАГРУЗКА ДАННЫХ
+    Future<void> loadData() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      // 1. Сначала скачиваем данные в локальные временные переменные
+      final foldersData = await _supabase.from('folders').select().eq('user_id', user.id);
+      final tasksData = await _supabase.from('tasks').select().eq('user_id', user.id);
+
+      if (!mounted) return;
+
+      // 2. И только ПОСЛЕ успешного скачивания обновляем интерфейс экрана
       setState(() {
-        // Конвертируем данные из облака в наши модели Flutter
         folders = (foldersData as List).map((item) => FolderModel.fromJson(item)).toList();
         tasks = (tasksData as List).map((item) => TaskModel.fromJson(item)).toList();
 
-        // Если папок в облаке вообще нет (первый запуск), создаем стандартные
         if (folders.isEmpty) {
           _createDefaultFolders();
         }
       });
     } catch (e) {
-      debugPrint('Ошибка загрузки данных из Supabase: $e');
+      debugPrint('Ошибка сети Supabase RLS: $e');
     }
   }
-
-  // Создание дефолтных папок, если база пуста
   void _createDefaultFolders() {
     final defaultFolders = [
       FolderModel(name: 'Работа', color: Colors.blue),
@@ -47,66 +52,76 @@ mixin HomeScreenLogic<T extends StatefulWidget> on State<T> {
   }
 
   int getUncompletedCount(String folderName) {
-    return tasks.where((task) => task.folderName == folderName && !task.isDone).length;
+    return tasks.where((task) => 
+      task.folderName == folderName && 
+      !task.isDone && 
+      task.date == formattedSelectedDate
+    ).length;
   }
-
-  // ДОБАВЛЕНИЕ ПАПКИ В ОБЛАКО
+  // Добавление папки с привязкой к user_id
   void addFolder(String name, Color color) async {
-    final newFolder = FolderModel(name: name, color: color);
-    setState(() {
-      folders.add(newFolder);
-    });
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
 
-    // Отправляем запись в таблицу 'folders'
-    await _supabase.from('folders').insert(newFolder.toJson());
+    final newFolder = FolderModel(name: name, color: color);
+    setState(() { folders.add(newFolder); });
+
+    final folderJson = newFolder.toJson();
+    folderJson['user_id'] = user.id;
+
+    await _supabase.from('folders').insert(folderJson);
   }
 
-  // УДАЛЕНИЕ ПАПКИ ИЗ ОБЛАКА
+  // Удаление папки
   void deleteFolder(int index) async {
     final folderName = folders[index].name;
-    if (selectedFolderName == folderName) {
-      selectedFolderName = null;
-    }
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    if (selectedFolderName == folderName) selectedFolderName = null;
 
     setState(() {
       folders.removeAt(index);
-      // Каскадно удаляем локальные задачи, привязанные к этой папке
       tasks.removeWhere((task) => task.folderName == folderName);
     });
 
-    // Удаляем из облака саму папку и все её задачи по имени папки
-    await _supabase.from('folders').delete().eq('name', folderName);
-    await _supabase.from('tasks').delete().eq('folder_name', folderName);
+    await _supabase.from('folders').delete().eq('name', folderName).eq('user_id', user.id);
+    await _supabase.from('tasks').delete().eq('folder_name', folderName).eq('user_id', user.id);
   }
 
-  // ДОБАВЛЕНИЕ ЗАДАЧИ В ОБЛАКО
+  // Добавление задачи с привязкой к user_id
   void addTask(String title, String folderName) async {
-    final newTask = TaskModel(title: title, folderName: folderName);
-    setState(() {
-      tasks.add(newTask);
-    });
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
 
-    // Отправляем запись в таблицу 'tasks'
-    await _supabase.from('tasks').insert(newTask.toJson());
+    final newTask = TaskModel(title: title, folderName: folderName, date: formattedSelectedDate);
+    setState(() { tasks.add(newTask); });
+
+    final taskJson = newTask.toJson();
+    taskJson['user_id'] = user.id;
+
+    await _supabase.from('tasks').insert(taskJson);
   }
 
-  // ИЗМЕНЕНИЕ СТАТУСА (ГАЛОЧКИ) В ОБЛАКЕ
+  // Изменение статуса галочки
   void toggleTaskStatus(TaskModel task) async {
-    setState(() {
-      task.isDone = !task.isDone;
-    });
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
 
-    // Обновляем статус задачи в облаке по её названию
-    await _supabase.from('tasks').update({'is_done': task.isDone}).eq('title', task.title);
+    setState(() { task.isDone = !task.isDone; });
+    await _supabase.from('tasks').update({'is_done': task.isDone}).eq('title', task.title).eq('user_id', user.id);
   }
 
-  // УДАЛЕНИЕ ЗАДАЧИ ИЗ ОБЛАКА
+  // Удаление задачи (ИСПРАВЛЕНО!)
   void deleteTask(TaskModel task) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
     setState(() {
-      tasks.remove(task);
+      tasks.remove(task); // Локально удаляем задачу из списка
     });
 
-    // Удаляем из таблицы 'tasks' по названию задачи
-    await _supabase.from('tasks').delete().eq('title', task.title);
+    // Удаляем задачу из облака Supabase строго по её названию и ID владельца
+    await _supabase.from('tasks').delete().eq('title', task.title).eq('user_id', user.id);
   }
 }

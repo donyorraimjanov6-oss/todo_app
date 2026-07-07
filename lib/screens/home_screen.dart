@@ -1,9 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/folder_model.dart';
 import '../models/task_model.dart';
 import '../widgets/folder_card.dart';
+import 'home_screen_logic.dart';
+import 'settings_screen.dart'; // Подключаем экран настроек
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,91 +12,38 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  List<FolderModel> _folders = [];
-  List<TaskModel> _tasks = [];
-  String? _selectedFolderName;
-
+class _HomeScreenState extends State<HomeScreen> with HomeScreenLogic {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    loadData();
   }
 
-  // Загрузка данных из памяти телефона при старте
-  Future<void> _loadData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? foldersJson = prefs.getString('user_folders');
-    final String? tasksJson = prefs.getString('user_tasks');
-
-    setState(() {
-      if (foldersJson != null) {
-        final List<dynamic> decoded = jsonDecode(foldersJson);
-        _folders = decoded.map((item) => FolderModel.fromJson(item)).toList();
-      } else {
-        _folders = [
-          FolderModel(name: 'Работа', color: Colors.blue),
-          FolderModel(name: 'Личное', color: Colors.green),
-          FolderModel(name: 'Учеба', color: Colors.orange),
-          FolderModel(name: 'Спорт', color: Colors.purple),
-        ];
-      }
-
-      if (tasksJson != null) {
-        final List<dynamic> decoded = jsonDecode(tasksJson);
-        _tasks = decoded.map((item) => TaskModel.fromJson(item)).toList();
-      }
-    });
-  }
-
-  // Сохранение изменений в память
-  Future<void> _saveData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String foldersJson = jsonEncode(_folders.map((f) => f.toJson()).toList());
-    final String tasksJson = jsonEncode(_tasks.map((t) => t.toJson()).toList());
-
-    await prefs.setString('user_folders', foldersJson);
-    await prefs.setString('user_tasks', tasksJson);
-  }
-
-  int _getUncompletedCount(String folderName) {
-    return _tasks.where((task) => task.folderName == folderName && !task.isDone).length;
-  }
-
+  // Поиск цвета папки для окрашивания задач
   Color _getFolderColor(String folderName) {
-    final folder = _folders.firstWhere(
+    final folder = folders.firstWhere(
       (f) => f.name == folderName,
       orElse: () => FolderModel(name: '', color: Colors.grey),
     );
     return folder.color;
   }
 
-  void _addFolder(String name, Color color) {
-    setState(() { _folders.add(FolderModel(name: name, color: color)); });
-    _saveData();
+  // Всплывающий календарь на весь месяц
+  Future<void> _showFullMonthPicker() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      helpText: 'ВЫБЕРИТЕ ДЕНЬ ИЗ МЕСЯЦА',
+    );
+    if (picked != null && picked != selectedDate) {
+      setState(() {
+        selectedDate = picked;
+      });
+    }
   }
-
-  void _deleteFolder(int index) {
-    if (_selectedFolderName == _folders[index].name) _selectedFolderName = null;
-    setState(() { _folders.removeAt(index); });
-    _saveData();
-  }
-
-  void _addTask(String title, String folderName) {
-    setState(() { _tasks.add(TaskModel(title: title, folderName: folderName)); });
-    _saveData();
-  }
-
-  void _toggleTaskStatus(TaskModel task) {
-    setState(() { task.isDone = !task.isDone; });
-    _saveData();
-  }
-
-  void _deleteTask(TaskModel task) {
-    setState(() { _tasks.remove(task); });
-    _saveData();
-  }
-  // Всплывающее окно для новой папки
+  // Диалог создания папки
   void _showAddFolderDialog() {
     final TextEditingController controller = TextEditingController();
     Color selectedColor = Colors.red;
@@ -130,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ElevatedButton(
               onPressed: () {
                 if (controller.text.isNotEmpty) {
-                  _addFolder(controller.text, selectedColor);
+                  addFolder(controller.text, selectedColor);
                   Navigator.pop(context);
                 }
               },
@@ -149,10 +96,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Всплывающее окно для новой задачи
+  // Диалог создания новой задачи
   void _showAddTaskDialog() {
     final TextEditingController taskController = TextEditingController();
-    String selectedFolder = _folders.isNotEmpty ? _folders.first.name : 'Без папки';
+    String selectedFolder = folders.isNotEmpty ? folders.first.name : 'Без папки';
 
     showDialog(
       context: context,
@@ -160,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('Добавить новую задачу'),
+              title: Text('Задача на $formattedSelectedDate'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -176,9 +123,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Text('Выберите папку:'),
                       DropdownButton<String>(
                         value: selectedFolder,
-                        items: _folders.isEmpty
+                        items: folders.isEmpty
                             ? [const DropdownMenuItem(value: 'Без папки', child: Text('Без папки'))]
-                            : _folders.map((folder) {
+                            : folders.map((folder) {
                                 return DropdownMenuItem<String>(
                                   value: folder.name,
                                   child: Text(folder.name),
@@ -199,7 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ElevatedButton(
                   onPressed: () {
                     if (taskController.text.isNotEmpty) {
-                      _addTask(taskController.text, selectedFolder);
+                      addTask(taskController.text, selectedFolder);
                       Navigator.pop(context);
                     }
                   },
@@ -214,19 +161,100 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   @override
   Widget build(BuildContext context) {
-    // Фильтрация списка задач на лету
-    final List<TaskModel> filteredTasks = _selectedFolderName == null
-        ? _tasks
-        : _tasks.where((task) => task.folderName == _selectedFolderName).toList();
+    final List<String> weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+    // Фильтрация задач по выбранному дню календаря и выбранной папке
+    final List<TaskModel> filteredTasks = tasks.where((task) {
+      final matchesDate = task.date == formattedSelectedDate;
+      final matchesFolder = selectedFolderName == null || task.folderName == selectedFolderName;
+      return matchesDate && matchesFolder;
+    }).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Мои Задачи'), centerTitle: true),
+      appBar: AppBar(
+        title: const Text('Мои Задачи', style: TextStyle(fontWeight: FontWeight.bold)),
+        centerTitle: true,
+        
+              
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calendar_month),
+            tooltip: 'Зажмите день для выбора месяца',
+            onPressed: _showFullMonthPicker,
+          )
+        ],
+      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Блок папок сверху
+          // ЛЕНТА КАЛЕНДАРЯ НА 7 ДНЕЙ
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+            child: Text(
+              'Расписание (зажмите день для обзора месяца)',
+              style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500),
+            ),
+          ),
+          Container(
+            height: 80,
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: 7,
+              itemBuilder: (context, index) {
+                final dayDate = DateTime.now().add(Duration(days: index));
+                final isCurrentSelected = dayDate.day == selectedDate.day && 
+                                         dayDate.month == selectedDate.month;
+                
+                return GestureDetector(
+                  onTap: () {
+                    setState(() { selectedDate = dayDate; }); // Выбор дня
+                  },
+                  onLongPress: _showFullMonthPicker, // Месяц при удержании
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    width: 55,
+                    margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isCurrentSelected ? Colors.blue : Colors.blue.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isCurrentSelected ? Colors.blue : Colors.blue.withOpacity(0.2),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          weekDays[dayDate.weekday - 1],
+                          style: TextStyle(
+                            fontSize: 12, 
+                            fontWeight: FontWeight.bold,
+                            color: isCurrentSelected ? Colors.white : Colors.grey.shade700
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${dayDate.day}',
+                          style: TextStyle(
+                            fontSize: 18, 
+                            fontWeight: FontWeight.bold,
+                            color: isCurrentSelected ? Colors.white : Colors.black
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // БЛОК ОВАЛЬНЫХ ПАПОК СВЕРХУ
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -241,49 +269,53 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           SizedBox(
             height: 60,
-            child: _folders.isEmpty
+            child: folders.isEmpty
                 ? const Center(child: Text('Нет папок. Добавьте первую!'))
                 : ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _folders.length,
+                    itemCount: folders.length,
                     itemBuilder: (context, index) {
-                      final folder = _folders[index];
-                      final isSelected = _selectedFolderName == folder.name;
+                      final folder = folders[index];
+                      final isSelected = selectedFolderName == folder.name;
                       return FolderCard(
                         folder: folder,
-                        taskCount: _getUncompletedCount(folder.name),
+                        taskCount: getUncompletedCount(folder.name),
                         isSelected: isSelected,
                         onTap: () {
-                          setState(() { _selectedFolderName = isSelected ? null : folder.name; });
+                          setState(() { selectedFolderName = isSelected ? null : folder.name; });
                         },
-                        onDelete: () => _deleteFolder(index),
+                        onDelete: () => deleteFolder(index),
                       );
                     },
                   ),
           ),
-          // Блок заголовка задач
+
+          // ЗАГОЛОВОК СПИСКА ЗАДАЧ
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  _selectedFolderName == null ? 'Все задачи' : 'Задачи: $_selectedFolderName',
+                  selectedFolderName == null ? 'Задачи на день' : 'Категория: $selectedFolderName',
                   style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
-                if (_selectedFolderName != null)
+                if (selectedFolderName != null)
                   TextButton(
-                    onPressed: () { setState(() { _selectedFolderName = null; }); },
+                    onPressed: () { setState(() { selectedFolderName = null; }); },
                     child: const Text('Показать все'),
                   ),
               ],
             ),
           ),
-          // Список цветных задач
+          
+          // СПИСОК КАРТОЧЕК ЗАДАЧ
           Expanded(
             child: filteredTasks.isEmpty
-                ? const Center(child: Text('В этой категории нет задач', style: TextStyle(color: Colors.grey)))
+                ? const Center(
+                    child: Text('На этот день задач нет', style: TextStyle(color: Colors.grey)),
+                  )
                 : ListView.builder(
                     itemCount: filteredTasks.length,
                     itemBuilder: (context, index) {
@@ -315,10 +347,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             subtitle: Text('Папка: ${task.folderName}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                             value: task.isDone,
-                            onChanged: (bool? value) { _toggleTaskStatus(task); },
+                            onChanged: (bool? value) { toggleTaskStatus(task); },
                             secondary: IconButton(
                               icon: const Icon(Icons.delete_outline, color: Colors.red),
-                              onPressed: () => _deleteTask(task),
+                              onPressed: () => deleteTask(task),
                             ),
                             controlAffinity: ListTileControlAffinity.leading,
                           ),
@@ -329,7 +361,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      // Нижний плюс
+      // НИЖНИЙ ПЛЮС ДЛЯ ЗАДАЧ
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddTaskDialog,
         tooltip: 'Добавить задачу',
