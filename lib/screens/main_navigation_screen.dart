@@ -13,23 +13,23 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
-  // Список наших экранов для нижней панели
+  // Порядок экранов должен строго совпадать с кнопками внизу!
   final List<Widget> _screens = [
-    const HomeScreen(),
-    const FinanceScreen(),
-    const SettingsScreen(),
+    const HomeScreen(),       // Индекс 0 — Экран Задач
+    const FinanceScreen(),    // Индекс 1 — Экран Капитала
+    const SettingsScreen(),   // Индекс 2 — Экран Настроек
   ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens, // Сохраняет состояние экранов при переключении
+        children: _screens, 
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) {
+          // Принудительно меняем индекс экрана при клике на иконку
           setState(() {
             _currentIndex = index;
           });
@@ -37,10 +37,20 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         selectedItemColor: Colors.blue,
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
+        // Обязательно три иконки, строго в том же порядке!
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.check_circle_outline), label: 'Задачи'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet_outlined), label: 'Капитал'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'Настройки'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.check_circle_outline), 
+            label: 'Задачи',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.account_balance_wallet_outlined), 
+            label: 'Капитал',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings_outlined), 
+            label: 'Настройки',
+          ),
         ],
       ),
     );

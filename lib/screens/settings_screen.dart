@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../main.dart'; // Импортируем наш глобальный themeService
+import '../main.dart'; 
 import 'auth_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -13,6 +15,35 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final _supabase = Supabase.instance.client;
   bool _isClearing = false;
+  bool _isBackuping = false;
+
+  Future<void> _backupData() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+    setState(() => _isBackuping = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? localData = prefs.getString('local_finances');
+      if (localData == null || localData == '[]') {
+        _showSnackbar('Нет локальных данных для резервного копирования', Colors.orange);
+        setState(() => _isBackuping = false);
+        return;
+      }
+      await _supabase.from('finances').delete().eq('user_id', user.id);
+      final List<dynamic> decoded = jsonDecode(localData);
+      for (var item in decoded) {
+        final Map<String, dynamic> json = Map<String, dynamic>.from(item);
+        json['user_id'] = user.id; 
+        json.remove('id'); 
+        await _supabase.from('finances').insert(json);
+      }
+      _showSnackbar('Резервная копия успешно создана в облаке Supabase!', Colors.green);
+    } catch (e) {
+      _showSnackbar('Ошибка синхронизации бэкапа: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isBackuping = false);
+    }
+  }
 
   Future<void> _logout() async {
     try {
@@ -32,11 +63,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _clearAllTasks() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-
     setState(() => _isClearing = true);
     try {
       await _supabase.from('tasks').delete().eq('user_id', user.id);
-      _showSnackbar('Все задачи успешно удалены!', Colors.green);
+      _showSnackbar('Все задачи успешно удалены из облака!', Colors.green);
     } catch (e) {
       _showSnackbar('Ошибка при удалении задач', Colors.red);
     } finally {
@@ -55,7 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Очистить списки?'),
-        content: const Text('Это действие безвозвратно удалит абсолютно все ваши задачи из облака Supabase.'),
+        content: const Text('Это действие безвозвратно удалит все задачи из облака Supabase.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
           ElevatedButton(
@@ -124,7 +154,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Text('Внешний вид', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
           ),
 
-          // === НОВЫЙ БЛОК: ТУМБЛЕР ТЁМНОЙ ТЕМЫ ===
           Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: ListenableBuilder(
@@ -139,7 +168,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: const Text('Комфортный режим для глаз'),
                   value: themeService.isDarkMode,
                   onChanged: (bool value) {
-                    themeService.toggleTheme(value); // Меняем тему
+                    themeService.toggleTheme(value);
                   },
                 );
               },
@@ -151,6 +180,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             child: Text('Настройки данных', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
           ),
+
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              leading: _isBackuping
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.cloud_upload, color: Colors.blue),
+              title: const Text('Создать резервную копию', style: TextStyle(fontWeight: FontWeight.w500)),
+              subtitle: const Text('Сохранить локальный капитал в облако'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: _isBackuping ? null : _backupData,
+            ),
+          ),
+          const SizedBox(height: 8),
 
           Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
