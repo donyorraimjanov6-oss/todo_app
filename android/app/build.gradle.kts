@@ -49,5 +49,5 @@ flutter {
 
 dependencies {
     // 2. ПОДКЛЮЧАЕМ ОФИЦИАЛЬНУЮ БИБЛИОТЕКУ-ПЕРЕВОДЧИК СИСТЕМНОГО ВРЕМЕНИ ДЛЯ ANDROID
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
