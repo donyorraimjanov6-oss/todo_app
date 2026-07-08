@@ -10,8 +10,9 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 
     defaultConfig {
@@ -44,4 +45,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+dependencies {
+    // 2. ПОДКЛЮЧАЕМ ОФИЦИАЛЬНУЮ БИБЛИОТЕКУ-ПЕРЕВОДЧИК СИСТЕМНОГО ВРЕМЕНИ ДЛЯ ANDROID
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
